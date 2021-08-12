@@ -1,0 +1,6 @@
+ičiji,ičije,ičijom,ičiju
+ikakav,ikakava,ikakave,ikakavi,ikakavih,ikakavim,ikakavo,ikakavog,ikakavoga,ikakavoj,ikakavom,ikakavome,ikakavomu,ikakavu,ikakva,ikakve,ikakvi,ikakvih,ikakvim,ikakvima,ikakvo,ikakvog,ikakvoga,ikakvoj,ikakvom,ikakvome,ikakvomu,ikakvu
+ikoji,ikog,ikoga,ikoja,ikoje,ikojeg,ikojega,ikojem,ikojemu,ikoji,ikojih,ikojim,ikojima,ikojime,ikojoj,ikojom,ikoju,ikome,ikomu
+onaj,onih,onim,onima,onog,onoga,onoj,onom,onome,onomu,onu
+svoj,svog,svoga,svoj,svoja,svoje,svojeg,svojega,svojem,svojemu,svoji,svojih,svojim,svojima,svojoj,svojom,svoju,svom,svome,svomu
+takav,takav,takava,takave,takavi,takavih,takavim,takavima,takavo,takavog,takavoga,takavoj,takavom,takavome,takavomu,takavu,takva,takve,takvi,takvih,takvim,takvima,takvo,takvog,takvoga,takvoj,takvom,takvome,takvomu,takvu

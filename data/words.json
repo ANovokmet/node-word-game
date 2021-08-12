@@ -1,0 +1,50 @@
+[
+    {
+        "type": "veznik",
+        "count": 27
+    },
+    {
+        "type": "imenica",
+        "count": 63253
+    },
+    {
+        "type": "pridjev",
+        "count": 46723
+    },
+    {
+        "type": "glagol",
+        "count": 13918
+    },
+    {
+        "type": "prilog",
+        "count": 9110
+    },
+    {
+        "type": "uzvik",
+        "count": 47
+    },
+    {
+        "type": "čestica",
+        "count": 8
+    },
+    {
+        "type": "pril. (čest.)",
+        "count": 7
+    },
+    {
+        "type": "broj",
+        "count": 84
+    },
+    {
+        "type": "prijedlog",
+        "count": 70
+    },
+    {
+        "type": "zamjenica",
+        "count": 73
+    },
+    {
+        "type": "pridjevska zamjenica",
+        "count": 6
+    }
+]

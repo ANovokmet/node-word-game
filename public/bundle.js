@@ -25,6 +25,25 @@ var app = (function () {
     function is_empty(obj) {
         return Object.keys(obj).length === 0;
     }
+    function validate_store(store, name) {
+        if (store != null && typeof store.subscribe !== 'function') {
+            throw new Error(`'${name}' is not a store with a 'subscribe' method`);
+        }
+    }
+    function subscribe(store, ...callbacks) {
+        if (store == null) {
+            return noop;
+        }
+        const unsub = store.subscribe(...callbacks);
+        return unsub.unsubscribe ? () => unsub.unsubscribe() : unsub;
+    }
+    function component_subscribe(component, store, callback) {
+        component.$$.on_destroy.push(subscribe(store, callback));
+    }
+    function set_store_value(store, ret, value) {
+        store.set(value);
+        return ret;
+    }
     function append(target, node) {
         target.appendChild(node);
     }
@@ -49,6 +68,9 @@ var app = (function () {
     function space() {
         return text(' ');
     }
+    function empty$1() {
+        return text('');
+    }
     function listen(node, event, handler, options) {
         node.addEventListener(event, handler, options);
         return () => node.removeEventListener(event, handler, options);
@@ -64,9 +86,6 @@ var app = (function () {
     }
     function set_input_value(input, value) {
         input.value = value == null ? '' : value;
-    }
-    function toggle_class(element, name, toggle) {
-        element.classList[toggle ? 'add' : 'remove'](name);
     }
     function custom_event(type, detail, bubbles = false) {
         const e = document.createEvent('CustomEvent');
@@ -143,10 +162,40 @@ var app = (function () {
         }
     }
     const outroing = new Set();
+    let outros;
+    function group_outros() {
+        outros = {
+            r: 0,
+            c: [],
+            p: outros // parent group
+        };
+    }
+    function check_outros() {
+        if (!outros.r) {
+            run_all(outros.c);
+        }
+        outros = outros.p;
+    }
     function transition_in(block, local) {
         if (block && block.i) {
             outroing.delete(block);
             block.i(local);
+        }
+    }
+    function transition_out(block, local, detach, callback) {
+        if (block && block.o) {
+            if (outroing.has(block))
+                return;
+            outroing.add(block);
+            outros.c.push(() => {
+                outroing.delete(block);
+                if (callback) {
+                    if (detach)
+                        block.d(1);
+                    callback();
+                }
+            });
+            block.o(local);
         }
     }
 
@@ -155,6 +204,9 @@ var app = (function () {
         : typeof globalThis !== 'undefined'
             ? globalThis
             : global);
+    function create_component(block) {
+        block && block.c();
+    }
     function mount_component(component, target, anchor, customElement) {
         const { fragment, on_mount, on_destroy, after_update } = component.$$;
         fragment && fragment.m(target, anchor);
@@ -5201,6 +5253,234 @@ var app = (function () {
     io.Manager;
     io.Socket;
 
+    const subscriber_queue = [];
+    /**
+     * Create a `Writable` store that allows both updating and reading by subscription.
+     * @param {*=}value initial value
+     * @param {StartStopNotifier=}start start and stop notifications for subscriptions
+     */
+    function writable(value, start = noop) {
+        let stop;
+        const subscribers = new Set();
+        function set(new_value) {
+            if (safe_not_equal(value, new_value)) {
+                value = new_value;
+                if (stop) { // store is ready
+                    const run_queue = !subscriber_queue.length;
+                    for (const subscriber of subscribers) {
+                        subscriber[1]();
+                        subscriber_queue.push(subscriber, value);
+                    }
+                    if (run_queue) {
+                        for (let i = 0; i < subscriber_queue.length; i += 2) {
+                            subscriber_queue[i][0](subscriber_queue[i + 1]);
+                        }
+                        subscriber_queue.length = 0;
+                    }
+                }
+            }
+        }
+        function update(fn) {
+            set(fn(value));
+        }
+        function subscribe(run, invalidate = noop) {
+            const subscriber = [run, invalidate];
+            subscribers.add(subscriber);
+            if (subscribers.size === 1) {
+                stop = start(set) || noop;
+            }
+            run(value);
+            return () => {
+                subscribers.delete(subscriber);
+                if (subscribers.size === 0) {
+                    stop();
+                    stop = null;
+                }
+            };
+        }
+        return { set, update, subscribe };
+    }
+
+    const store = writable({});
+
+    function connect(socket) {
+        socket.on('users', (data) => {
+            const users = {};
+            for (const user of data) {
+                users[user.userId] = user;
+            }
+            store.set(users);
+        });
+
+        socket.on('user_connected', (data) => {
+            store.update(users => ({
+                ...users,
+                [data.userId]: data
+            }));
+        });
+
+        socket.on('user_disconnected', (data) => {
+            store.update(users => {
+                const { [data.userId]: removed, ...rest } = users;
+                return rest;
+            });
+        });
+
+        socket.on('username_change', data => {
+            store.update(users => ({
+                ...users,
+                [data.userId]: { ...users[data.userId], ...data }
+            }));
+        });
+
+        socket.on('score_update', data => {
+
+            store.update(users => {
+                for (const userId in data) {
+                    users[userId].score = data[userId];
+                }
+                return users;
+            });
+        });
+
+        return store;
+    }
+
+    /* client\Sentence.svelte generated by Svelte v3.42.1 */
+
+    const file$1 = "client\\Sentence.svelte";
+
+    function create_fragment$1(ctx) {
+    	let div3;
+    	let div0;
+    	let t0_value = /*fixed*/ ctx[0][0] + "";
+    	let t0;
+    	let t1;
+    	let div1;
+    	let t2_value = /*syllables*/ ctx[1].join('') + "";
+    	let t2;
+    	let t3;
+    	let div2;
+    	let t4_value = /*fixed*/ ctx[0][1] + "";
+    	let t4;
+
+    	const block = {
+    		c: function create() {
+    			div3 = element("div");
+    			div0 = element("div");
+    			t0 = text(t0_value);
+    			t1 = space();
+    			div1 = element("div");
+    			t2 = text(t2_value);
+    			t3 = space();
+    			div2 = element("div");
+    			t4 = text(t4_value);
+    			attr_dev(div0, "class", "syl syl-fixed svelte-1pe70f6");
+    			add_location(div0, file$1, 6, 4, 120);
+    			attr_dev(div1, "class", "syl syl-added svelte-1pe70f6");
+    			add_location(div1, file$1, 9, 4, 185);
+    			attr_dev(div2, "class", "syl syl-fixed svelte-1pe70f6");
+    			add_location(div2, file$1, 12, 4, 260);
+    			attr_dev(div3, "class", "syl-sentence syls svelte-1pe70f6");
+    			add_location(div3, file$1, 5, 0, 83);
+    		},
+    		l: function claim(nodes) {
+    			throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
+    		},
+    		m: function mount(target, anchor) {
+    			insert_dev(target, div3, anchor);
+    			append_dev(div3, div0);
+    			append_dev(div0, t0);
+    			append_dev(div3, t1);
+    			append_dev(div3, div1);
+    			append_dev(div1, t2);
+    			append_dev(div3, t3);
+    			append_dev(div3, div2);
+    			append_dev(div2, t4);
+    		},
+    		p: function update(ctx, [dirty]) {
+    			if (dirty & /*fixed*/ 1 && t0_value !== (t0_value = /*fixed*/ ctx[0][0] + "")) set_data_dev(t0, t0_value);
+    			if (dirty & /*syllables*/ 2 && t2_value !== (t2_value = /*syllables*/ ctx[1].join('') + "")) set_data_dev(t2, t2_value);
+    			if (dirty & /*fixed*/ 1 && t4_value !== (t4_value = /*fixed*/ ctx[0][1] + "")) set_data_dev(t4, t4_value);
+    		},
+    		i: noop,
+    		o: noop,
+    		d: function destroy(detaching) {
+    			if (detaching) detach_dev(div3);
+    		}
+    	};
+
+    	dispatch_dev("SvelteRegisterBlock", {
+    		block,
+    		id: create_fragment$1.name,
+    		type: "component",
+    		source: "",
+    		ctx
+    	});
+
+    	return block;
+    }
+
+    function instance$1($$self, $$props, $$invalidate) {
+    	let { $$slots: slots = {}, $$scope } = $$props;
+    	validate_slots('Sentence', slots, []);
+    	let { fixed = [] } = $$props;
+    	let { syllables = [] } = $$props;
+    	const writable_props = ['fixed', 'syllables'];
+
+    	Object.keys($$props).forEach(key => {
+    		if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console.warn(`<Sentence> was created with unknown prop '${key}'`);
+    	});
+
+    	$$self.$$set = $$props => {
+    		if ('fixed' in $$props) $$invalidate(0, fixed = $$props.fixed);
+    		if ('syllables' in $$props) $$invalidate(1, syllables = $$props.syllables);
+    	};
+
+    	$$self.$capture_state = () => ({ fixed, syllables });
+
+    	$$self.$inject_state = $$props => {
+    		if ('fixed' in $$props) $$invalidate(0, fixed = $$props.fixed);
+    		if ('syllables' in $$props) $$invalidate(1, syllables = $$props.syllables);
+    	};
+
+    	if ($$props && "$$inject" in $$props) {
+    		$$self.$inject_state($$props.$$inject);
+    	}
+
+    	return [fixed, syllables];
+    }
+
+    class Sentence extends SvelteComponentDev {
+    	constructor(options) {
+    		super(options);
+    		init(this, options, instance$1, create_fragment$1, safe_not_equal, { fixed: 0, syllables: 1 });
+
+    		dispatch_dev("SvelteRegisterComponent", {
+    			component: this,
+    			tagName: "Sentence",
+    			options,
+    			id: create_fragment$1.name
+    		});
+    	}
+
+    	get fixed() {
+    		throw new Error("<Sentence>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+
+    	set fixed(value) {
+    		throw new Error("<Sentence>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+
+    	get syllables() {
+    		throw new Error("<Sentence>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+
+    	set syllables(value) {
+    		throw new Error("<Sentence>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+    }
+
     /* client\App.svelte generated by Svelte v3.42.1 */
 
     const { Object: Object_1, console: console_1, document: document_1 } = globals;
@@ -5208,41 +5488,386 @@ var app = (function () {
 
     function get_each_context(ctx, list, i) {
     	const child_ctx = ctx.slice();
-    	child_ctx[20] = list[i];
+    	child_ctx[29] = list[i];
     	return child_ctx;
     }
 
     function get_each_context_1(ctx, list, i) {
     	const child_ctx = ctx.slice();
-    	child_ctx[23] = list[i];
+    	child_ctx[32] = list[i];
     	return child_ctx;
     }
 
     function get_each_context_2(ctx, list, i) {
     	const child_ctx = ctx.slice();
-    	child_ctx[26] = list[i];
+    	child_ctx[35] = list[i];
     	return child_ctx;
     }
 
-    // (173:8) {#each story as sentence}
-    function create_each_block_2(ctx) {
+    function get_each_context_3(ctx, list, i) {
+    	const child_ctx = ctx.slice();
+    	child_ctx[35] = list[i];
+    	child_ctx[39] = i;
+    	return child_ctx;
+    }
+
+    // (171:8) {#if state == STATE.playing}
+    function create_if_block_2(ctx) {
+    	let h3;
+    	let t1;
+    	let div2;
+    	let div0;
+    	let t2_value = /*game*/ ctx[2].sentence[0] + "";
+    	let t2;
+    	let t3;
+    	let t4;
+    	let div1;
+    	let t5_value = /*game*/ ctx[2].sentence[1] + "";
+    	let t5;
+    	let t6;
+    	let p;
+    	let t7;
+    	let div3;
+    	let t8;
+    	let div4;
+    	let button;
+    	let mounted;
+    	let dispose;
+    	let each_value_3 = /*added*/ ctx[1];
+    	validate_each_argument(each_value_3);
+    	let each_blocks_1 = [];
+
+    	for (let i = 0; i < each_value_3.length; i += 1) {
+    		each_blocks_1[i] = create_each_block_3(get_each_context_3(ctx, each_value_3, i));
+    	}
+
+    	let each_value_2 = /*syls*/ ctx[5].filter(/*func*/ ctx[18]);
+    	validate_each_argument(each_value_2);
+    	let each_blocks = [];
+
+    	for (let i = 0; i < each_value_2.length; i += 1) {
+    		each_blocks[i] = create_each_block_2(get_each_context_2(ctx, each_value_2, i));
+    	}
+
+    	const block = {
+    		c: function create() {
+    			h3 = element("h3");
+    			h3.textContent = "Nadopuni rečenicu";
+    			t1 = space();
+    			div2 = element("div");
+    			div0 = element("div");
+    			t2 = text(t2_value);
+    			t3 = space();
+
+    			for (let i = 0; i < each_blocks_1.length; i += 1) {
+    				each_blocks_1[i].c();
+    			}
+
+    			t4 = space();
+    			div1 = element("div");
+    			t5 = text(t5_value);
+    			t6 = space();
+    			p = element("p");
+    			t7 = space();
+    			div3 = element("div");
+
+    			for (let i = 0; i < each_blocks.length; i += 1) {
+    				each_blocks[i].c();
+    			}
+
+    			t8 = space();
+    			div4 = element("div");
+    			button = element("button");
+    			button.textContent = "Pošalji";
+    			add_location(h3, file, 173, 12, 4013);
+    			attr_dev(div0, "class", "syl syl-fixed svelte-yjn5i0");
+    			add_location(div0, file, 175, 16, 4102);
+    			attr_dev(div1, "class", "syl syl-fixed svelte-yjn5i0");
+    			add_location(div1, file, 188, 16, 4625);
+    			attr_dev(div2, "class", "syl-sentence syls svelte-yjn5i0");
+    			add_location(div2, file, 174, 12, 4053);
+    			add_location(p, file, 192, 12, 4751);
+    			attr_dev(div3, "class", "syls svelte-yjn5i0");
+    			add_location(div3, file, 193, 12, 4772);
+    			attr_dev(button, "class", "btn svelte-yjn5i0");
+    			add_location(button, file, 202, 16, 5117);
+    			attr_dev(div4, "class", "btn-group svelte-yjn5i0");
+    			add_location(div4, file, 201, 12, 5076);
+    		},
+    		m: function mount(target, anchor) {
+    			insert_dev(target, h3, anchor);
+    			insert_dev(target, t1, anchor);
+    			insert_dev(target, div2, anchor);
+    			append_dev(div2, div0);
+    			append_dev(div0, t2);
+    			append_dev(div2, t3);
+
+    			for (let i = 0; i < each_blocks_1.length; i += 1) {
+    				each_blocks_1[i].m(div2, null);
+    			}
+
+    			append_dev(div2, t4);
+    			append_dev(div2, div1);
+    			append_dev(div1, t5);
+    			insert_dev(target, t6, anchor);
+    			insert_dev(target, p, anchor);
+    			insert_dev(target, t7, anchor);
+    			insert_dev(target, div3, anchor);
+
+    			for (let i = 0; i < each_blocks.length; i += 1) {
+    				each_blocks[i].m(div3, null);
+    			}
+
+    			insert_dev(target, t8, anchor);
+    			insert_dev(target, div4, anchor);
+    			append_dev(div4, button);
+
+    			if (!mounted) {
+    				dispose = listen_dev(button, "click", /*onSubmitSentence*/ ctx[9], false, false, false);
+    				mounted = true;
+    			}
+    		},
+    		p: function update(ctx, dirty) {
+    			if (dirty[0] & /*game*/ 4 && t2_value !== (t2_value = /*game*/ ctx[2].sentence[0] + "")) set_data_dev(t2, t2_value);
+
+    			if (dirty[0] & /*added, remove*/ 8194) {
+    				each_value_3 = /*added*/ ctx[1];
+    				validate_each_argument(each_value_3);
+    				let i;
+
+    				for (i = 0; i < each_value_3.length; i += 1) {
+    					const child_ctx = get_each_context_3(ctx, each_value_3, i);
+
+    					if (each_blocks_1[i]) {
+    						each_blocks_1[i].p(child_ctx, dirty);
+    					} else {
+    						each_blocks_1[i] = create_each_block_3(child_ctx);
+    						each_blocks_1[i].c();
+    						each_blocks_1[i].m(div2, t4);
+    					}
+    				}
+
+    				for (; i < each_blocks_1.length; i += 1) {
+    					each_blocks_1[i].d(1);
+    				}
+
+    				each_blocks_1.length = each_value_3.length;
+    			}
+
+    			if (dirty[0] & /*game*/ 4 && t5_value !== (t5_value = /*game*/ ctx[2].sentence[1] + "")) set_data_dev(t5, t5_value);
+
+    			if (dirty[0] & /*add, syls, added*/ 16418) {
+    				each_value_2 = /*syls*/ ctx[5].filter(/*func*/ ctx[18]);
+    				validate_each_argument(each_value_2);
+    				let i;
+
+    				for (i = 0; i < each_value_2.length; i += 1) {
+    					const child_ctx = get_each_context_2(ctx, each_value_2, i);
+
+    					if (each_blocks[i]) {
+    						each_blocks[i].p(child_ctx, dirty);
+    					} else {
+    						each_blocks[i] = create_each_block_2(child_ctx);
+    						each_blocks[i].c();
+    						each_blocks[i].m(div3, null);
+    					}
+    				}
+
+    				for (; i < each_blocks.length; i += 1) {
+    					each_blocks[i].d(1);
+    				}
+
+    				each_blocks.length = each_value_2.length;
+    			}
+    		},
+    		d: function destroy(detaching) {
+    			if (detaching) detach_dev(h3);
+    			if (detaching) detach_dev(t1);
+    			if (detaching) detach_dev(div2);
+    			destroy_each(each_blocks_1, detaching);
+    			if (detaching) detach_dev(t6);
+    			if (detaching) detach_dev(p);
+    			if (detaching) detach_dev(t7);
+    			if (detaching) detach_dev(div3);
+    			destroy_each(each_blocks, detaching);
+    			if (detaching) detach_dev(t8);
+    			if (detaching) detach_dev(div4);
+    			mounted = false;
+    			dispose();
+    		}
+    	};
+
+    	dispatch_dev("SvelteRegisterBlock", {
+    		block,
+    		id: create_if_block_2.name,
+    		type: "if",
+    		source: "(171:8) {#if state == STATE.playing}",
+    		ctx
+    	});
+
+    	return block;
+    }
+
+    // (184:20) {#if i !== added.length - 1}
+    function create_if_block_3(ctx) {
     	let div;
-    	let raw_value = /*sentence*/ ctx[26] + "";
+    	let mounted;
+    	let dispose;
+
+    	function click_handler_1(...args) {
+    		return /*click_handler_1*/ ctx[17](/*i*/ ctx[39], ...args);
+    	}
 
     	const block = {
     		c: function create() {
     			div = element("div");
-    			attr_dev(div, "class", "story__sentence svelte-mmojh");
-    			add_location(div, file, 173, 12, 4403);
+    			attr_dev(div, "class", "space svelte-yjn5i0");
+    			add_location(div, file, 184, 24, 4473);
     		},
     		m: function mount(target, anchor) {
     			insert_dev(target, div, anchor);
-    			div.innerHTML = raw_value;
+
+    			if (!mounted) {
+    				dispose = listen_dev(div, "click", click_handler_1, false, false, false);
+    				mounted = true;
+    			}
     		},
-    		p: function update(ctx, dirty) {
-    			if (dirty & /*story*/ 16 && raw_value !== (raw_value = /*sentence*/ ctx[26] + "")) div.innerHTML = raw_value;		},
+    		p: function update(new_ctx, dirty) {
+    			ctx = new_ctx;
+    		},
     		d: function destroy(detaching) {
     			if (detaching) detach_dev(div);
+    			mounted = false;
+    			dispose();
+    		}
+    	};
+
+    	dispatch_dev("SvelteRegisterBlock", {
+    		block,
+    		id: create_if_block_3.name,
+    		type: "if",
+    		source: "(184:20) {#if i !== added.length - 1}",
+    		ctx
+    	});
+
+    	return block;
+    }
+
+    // (179:16) {#each added as syl, i}
+    function create_each_block_3(ctx) {
+    	let div;
+    	let t0_value = /*syl*/ ctx[35] + "";
+    	let t0;
+    	let t1;
+    	let if_block_anchor;
+    	let mounted;
+    	let dispose;
+
+    	function click_handler(...args) {
+    		return /*click_handler*/ ctx[16](/*syl*/ ctx[35], ...args);
+    	}
+
+    	let if_block = /*i*/ ctx[39] !== /*added*/ ctx[1].length - 1 && create_if_block_3(ctx);
+
+    	const block = {
+    		c: function create() {
+    			div = element("div");
+    			t0 = text(t0_value);
+    			t1 = space();
+    			if (if_block) if_block.c();
+    			if_block_anchor = empty$1();
+    			attr_dev(div, "class", "syl syl-added svelte-yjn5i0");
+    			add_location(div, file, 179, 20, 4258);
+    		},
+    		m: function mount(target, anchor) {
+    			insert_dev(target, div, anchor);
+    			append_dev(div, t0);
+    			insert_dev(target, t1, anchor);
+    			if (if_block) if_block.m(target, anchor);
+    			insert_dev(target, if_block_anchor, anchor);
+
+    			if (!mounted) {
+    				dispose = listen_dev(div, "click", click_handler, false, false, false);
+    				mounted = true;
+    			}
+    		},
+    		p: function update(new_ctx, dirty) {
+    			ctx = new_ctx;
+    			if (dirty[0] & /*added*/ 2 && t0_value !== (t0_value = /*syl*/ ctx[35] + "")) set_data_dev(t0, t0_value);
+
+    			if (/*i*/ ctx[39] !== /*added*/ ctx[1].length - 1) {
+    				if (if_block) {
+    					if_block.p(ctx, dirty);
+    				} else {
+    					if_block = create_if_block_3(ctx);
+    					if_block.c();
+    					if_block.m(if_block_anchor.parentNode, if_block_anchor);
+    				}
+    			} else if (if_block) {
+    				if_block.d(1);
+    				if_block = null;
+    			}
+    		},
+    		d: function destroy(detaching) {
+    			if (detaching) detach_dev(div);
+    			if (detaching) detach_dev(t1);
+    			if (if_block) if_block.d(detaching);
+    			if (detaching) detach_dev(if_block_anchor);
+    			mounted = false;
+    			dispose();
+    		}
+    	};
+
+    	dispatch_dev("SvelteRegisterBlock", {
+    		block,
+    		id: create_each_block_3.name,
+    		type: "each",
+    		source: "(179:16) {#each added as syl, i}",
+    		ctx
+    	});
+
+    	return block;
+    }
+
+    // (195:16) {#each syls.filter(s => !added.includes(s)) as syl}
+    function create_each_block_2(ctx) {
+    	let div;
+    	let t0_value = /*syl*/ ctx[35] + "";
+    	let t0;
+    	let t1;
+    	let mounted;
+    	let dispose;
+
+    	function click_handler_2(...args) {
+    		return /*click_handler_2*/ ctx[19](/*syl*/ ctx[35], ...args);
+    	}
+
+    	const block = {
+    		c: function create() {
+    			div = element("div");
+    			t0 = text(t0_value);
+    			t1 = space();
+    			attr_dev(div, "class", "syl syl-added svelte-yjn5i0");
+    			add_location(div, file, 195, 20, 4881);
+    		},
+    		m: function mount(target, anchor) {
+    			insert_dev(target, div, anchor);
+    			append_dev(div, t0);
+    			append_dev(div, t1);
+
+    			if (!mounted) {
+    				dispose = listen_dev(div, "click", click_handler_2, false, false, false);
+    				mounted = true;
+    			}
+    		},
+    		p: function update(new_ctx, dirty) {
+    			ctx = new_ctx;
+    			if (dirty[0] & /*syls, added*/ 34 && t0_value !== (t0_value = /*syl*/ ctx[35] + "")) set_data_dev(t0, t0_value);
+    		},
+    		d: function destroy(detaching) {
+    			if (detaching) detach_dev(div);
+    			mounted = false;
+    			dispose();
     		}
     	};
 
@@ -5250,26 +5875,20 @@ var app = (function () {
     		block,
     		id: create_each_block_2.name,
     		type: "each",
-    		source: "(173:8) {#each story as sentence}",
+    		source: "(195:16) {#each syls.filter(s => !added.includes(s)) as syl}",
     		ctx
     	});
 
     	return block;
     }
 
-    // (179:8) {#if state == states.MY_TURN}
-    function create_if_block_2(ctx) {
+    // (207:8) {#if state == STATE.waiting}
+    function create_if_block_1(ctx) {
     	let h3;
     	let t1;
-    	let div0;
-    	let t2;
-    	let textarea;
-    	let t3;
-    	let div1;
-    	let button;
-    	let mounted;
-    	let dispose;
-    	let each_value_1 = /*mustUseWords*/ ctx[3];
+    	let each_1_anchor;
+    	let current;
+    	let each_value_1 = /*game*/ ctx[2].results;
     	validate_each_argument(each_value_1);
     	let each_blocks = [];
 
@@ -5277,62 +5896,37 @@ var app = (function () {
     		each_blocks[i] = create_each_block_1(get_each_context_1(ctx, each_value_1, i));
     	}
 
+    	const out = i => transition_out(each_blocks[i], 1, 1, () => {
+    		each_blocks[i] = null;
+    	});
+
     	const block = {
     		c: function create() {
     			h3 = element("h3");
-    			h3.textContent = "Na tebi je red da nastaviš priču";
+    			h3.textContent = "Results";
     			t1 = space();
-    			div0 = element("div");
 
     			for (let i = 0; i < each_blocks.length; i += 1) {
     				each_blocks[i].c();
     			}
 
-    			t2 = space();
-    			textarea = element("textarea");
-    			t3 = space();
-    			div1 = element("div");
-    			button = element("button");
-    			button.textContent = "Pošalji";
-    			add_location(h3, file, 179, 12, 4572);
-    			attr_dev(div0, "class", "flex-row pills svelte-mmojh");
-    			add_location(div0, file, 180, 12, 4627);
-    			attr_dev(textarea, "class", "dp-textarea svelte-mmojh");
-    			add_location(textarea, file, 185, 12, 4875);
-    			attr_dev(button, "class", "btn svelte-mmojh");
-    			add_location(button, file, 187, 16, 5022);
-    			attr_dev(div1, "class", "btn-group svelte-mmojh");
-    			add_location(div1, file, 186, 12, 4981);
+    			each_1_anchor = empty$1();
+    			add_location(h3, file, 207, 12, 5270);
     		},
     		m: function mount(target, anchor) {
     			insert_dev(target, h3, anchor);
     			insert_dev(target, t1, anchor);
-    			insert_dev(target, div0, anchor);
 
     			for (let i = 0; i < each_blocks.length; i += 1) {
-    				each_blocks[i].m(div0, null);
+    				each_blocks[i].m(target, anchor);
     			}
 
-    			insert_dev(target, t2, anchor);
-    			insert_dev(target, textarea, anchor);
-    			set_input_value(textarea, /*inputSentence*/ ctx[0]);
-    			insert_dev(target, t3, anchor);
-    			insert_dev(target, div1, anchor);
-    			append_dev(div1, button);
-
-    			if (!mounted) {
-    				dispose = [
-    					listen_dev(textarea, "input", /*textarea_input_handler*/ ctx[12]),
-    					listen_dev(textarea, "keyup", /*onInputKeyup*/ ctx[8], false, false, false),
-    					listen_dev(button, "click", /*onSubmitSentence*/ ctx[7], false, false, false)
-    				];
-
-    				mounted = true;
-    			}
+    			insert_dev(target, each_1_anchor, anchor);
+    			current = true;
     		},
     		p: function update(ctx, dirty) {
-    			if (dirty & /*mustUseWords*/ 8) {
-    				each_value_1 = /*mustUseWords*/ ctx[3];
+    			if (dirty[0] & /*game, $users*/ 132) {
+    				each_value_1 = /*game*/ ctx[2].results;
     				validate_each_argument(each_value_1);
     				let i;
 
@@ -5341,121 +5935,47 @@ var app = (function () {
 
     					if (each_blocks[i]) {
     						each_blocks[i].p(child_ctx, dirty);
+    						transition_in(each_blocks[i], 1);
     					} else {
     						each_blocks[i] = create_each_block_1(child_ctx);
     						each_blocks[i].c();
-    						each_blocks[i].m(div0, null);
+    						transition_in(each_blocks[i], 1);
+    						each_blocks[i].m(each_1_anchor.parentNode, each_1_anchor);
     					}
     				}
 
-    				for (; i < each_blocks.length; i += 1) {
-    					each_blocks[i].d(1);
+    				group_outros();
+
+    				for (i = each_value_1.length; i < each_blocks.length; i += 1) {
+    					out(i);
     				}
 
-    				each_blocks.length = each_value_1.length;
+    				check_outros();
+    			}
+    		},
+    		i: function intro(local) {
+    			if (current) return;
+
+    			for (let i = 0; i < each_value_1.length; i += 1) {
+    				transition_in(each_blocks[i]);
     			}
 
-    			if (dirty & /*inputSentence*/ 1) {
-    				set_input_value(textarea, /*inputSentence*/ ctx[0]);
+    			current = true;
+    		},
+    		o: function outro(local) {
+    			each_blocks = each_blocks.filter(Boolean);
+
+    			for (let i = 0; i < each_blocks.length; i += 1) {
+    				transition_out(each_blocks[i]);
     			}
+
+    			current = false;
     		},
     		d: function destroy(detaching) {
     			if (detaching) detach_dev(h3);
     			if (detaching) detach_dev(t1);
-    			if (detaching) detach_dev(div0);
     			destroy_each(each_blocks, detaching);
-    			if (detaching) detach_dev(t2);
-    			if (detaching) detach_dev(textarea);
-    			if (detaching) detach_dev(t3);
-    			if (detaching) detach_dev(div1);
-    			mounted = false;
-    			run_all(dispose);
-    		}
-    	};
-
-    	dispatch_dev("SvelteRegisterBlock", {
-    		block,
-    		id: create_if_block_2.name,
-    		type: "if",
-    		source: "(179:8) {#if state == states.MY_TURN}",
-    		ctx
-    	});
-
-    	return block;
-    }
-
-    // (182:16) {#each mustUseWords as word}
-    function create_each_block_1(ctx) {
-    	let span;
-    	let t_value = /*word*/ ctx[23][0] + "";
-    	let t;
-    	let span_title_value;
-
-    	const block = {
-    		c: function create() {
-    			span = element("span");
-    			t = text(t_value);
-    			attr_dev(span, "class", "pill svelte-mmojh");
-    			attr_dev(span, "title", span_title_value = /*word*/ ctx[23].join(', '));
-    			toggle_class(span, "used", /*word*/ ctx[23].containedInText);
-    			add_location(span, file, 182, 20, 4723);
-    		},
-    		m: function mount(target, anchor) {
-    			insert_dev(target, span, anchor);
-    			append_dev(span, t);
-    		},
-    		p: function update(ctx, dirty) {
-    			if (dirty & /*mustUseWords*/ 8 && t_value !== (t_value = /*word*/ ctx[23][0] + "")) set_data_dev(t, t_value);
-
-    			if (dirty & /*mustUseWords*/ 8 && span_title_value !== (span_title_value = /*word*/ ctx[23].join(', '))) {
-    				attr_dev(span, "title", span_title_value);
-    			}
-
-    			if (dirty & /*mustUseWords*/ 8) {
-    				toggle_class(span, "used", /*word*/ ctx[23].containedInText);
-    			}
-    		},
-    		d: function destroy(detaching) {
-    			if (detaching) detach_dev(span);
-    		}
-    	};
-
-    	dispatch_dev("SvelteRegisterBlock", {
-    		block,
-    		id: create_each_block_1.name,
-    		type: "each",
-    		source: "(182:16) {#each mustUseWords as word}",
-    		ctx
-    	});
-
-    	return block;
-    }
-
-    // (192:8) {#if state == states.OTHER_TURN}
-    function create_if_block_1(ctx) {
-    	let h3;
-    	let t1;
-    	let p;
-
-    	const block = {
-    		c: function create() {
-    			h3 = element("h3");
-    			h3.textContent = "Čekaj";
-    			t1 = space();
-    			p = element("p");
-    			p.textContent = "Drugi igrač piše...";
-    			add_location(h3, file, 192, 12, 5179);
-    			add_location(p, file, 193, 12, 5207);
-    		},
-    		m: function mount(target, anchor) {
-    			insert_dev(target, h3, anchor);
-    			insert_dev(target, t1, anchor);
-    			insert_dev(target, p, anchor);
-    		},
-    		d: function destroy(detaching) {
-    			if (detaching) detach_dev(h3);
-    			if (detaching) detach_dev(t1);
-    			if (detaching) detach_dev(p);
+    			if (detaching) detach_dev(each_1_anchor);
     		}
     	};
 
@@ -5463,14 +5983,87 @@ var app = (function () {
     		block,
     		id: create_if_block_1.name,
     		type: "if",
-    		source: "(192:8) {#if state == states.OTHER_TURN}",
+    		source: "(207:8) {#if state == STATE.waiting}",
     		ctx
     	});
 
     	return block;
     }
 
-    // (197:8) {#if state == states.STOPPED}
+    // (209:12) {#each game.results as result}
+    function create_each_block_1(ctx) {
+    	let div;
+    	let strong;
+    	let t0_value = /*$users*/ ctx[7][/*result*/ ctx[32].userId].username + "";
+    	let t0;
+    	let t1;
+    	let sentence;
+    	let t2;
+    	let current;
+
+    	sentence = new Sentence({
+    			props: {
+    				syllables: /*result*/ ctx[32].syls,
+    				fixed: /*game*/ ctx[2].sentence
+    			},
+    			$$inline: true
+    		});
+
+    	const block = {
+    		c: function create() {
+    			div = element("div");
+    			strong = element("strong");
+    			t0 = text(t0_value);
+    			t1 = space();
+    			create_component(sentence.$$.fragment);
+    			t2 = space();
+    			add_location(strong, file, 210, 20, 5392);
+    			attr_dev(div, "class", "flex-row svelte-yjn5i0");
+    			add_location(div, file, 209, 16, 5348);
+    		},
+    		m: function mount(target, anchor) {
+    			insert_dev(target, div, anchor);
+    			append_dev(div, strong);
+    			append_dev(strong, t0);
+    			append_dev(div, t1);
+    			mount_component(sentence, div, null);
+    			append_dev(div, t2);
+    			current = true;
+    		},
+    		p: function update(ctx, dirty) {
+    			if ((!current || dirty[0] & /*$users, game*/ 132) && t0_value !== (t0_value = /*$users*/ ctx[7][/*result*/ ctx[32].userId].username + "")) set_data_dev(t0, t0_value);
+    			const sentence_changes = {};
+    			if (dirty[0] & /*game*/ 4) sentence_changes.syllables = /*result*/ ctx[32].syls;
+    			if (dirty[0] & /*game*/ 4) sentence_changes.fixed = /*game*/ ctx[2].sentence;
+    			sentence.$set(sentence_changes);
+    		},
+    		i: function intro(local) {
+    			if (current) return;
+    			transition_in(sentence.$$.fragment, local);
+    			current = true;
+    		},
+    		o: function outro(local) {
+    			transition_out(sentence.$$.fragment, local);
+    			current = false;
+    		},
+    		d: function destroy(detaching) {
+    			if (detaching) detach_dev(div);
+    			destroy_component(sentence);
+    		}
+    	};
+
+    	dispatch_dev("SvelteRegisterBlock", {
+    		block,
+    		id: create_each_block_1.name,
+    		type: "each",
+    		source: "(209:12) {#each game.results as result}",
+    		ctx
+    	});
+
+    	return block;
+    }
+
+    // (217:8) {#if state == STATE.stopped}
     function create_if_block(ctx) {
     	let h3;
     	let t1;
@@ -5483,8 +6076,8 @@ var app = (function () {
     			t1 = space();
     			p = element("p");
     			p.textContent = "Igra je zaustavljena...";
-    			add_location(h3, file, 197, 12, 5303);
-    			add_location(p, file, 198, 12, 5344);
+    			add_location(h3, file, 217, 12, 5644);
+    			add_location(p, file, 218, 12, 5685);
     		},
     		m: function mount(target, anchor) {
     			insert_dev(target, h3, anchor);
@@ -5502,20 +6095,20 @@ var app = (function () {
     		block,
     		id: create_if_block.name,
     		type: "if",
-    		source: "(197:8) {#if state == states.STOPPED}",
+    		source: "(217:8) {#if state == STATE.stopped}",
     		ctx
     	});
 
     	return block;
     }
 
-    // (217:8) {#each Object.values(users) as player}
+    // (237:8) {#each Object.values($users) as player}
     function create_each_block(ctx) {
     	let div;
-    	let t0_value = /*player*/ ctx[20].username + "";
+    	let t0_value = /*player*/ ctx[29].username + "";
     	let t0;
     	let t1;
-    	let t2_value = /*player*/ ctx[20].score + "";
+    	let t2_value = /*player*/ ctx[29].score + "";
     	let t2;
     	let t3;
 
@@ -5527,7 +6120,7 @@ var app = (function () {
     			t2 = text(t2_value);
     			t3 = space();
     			attr_dev(div, "class", "player");
-    			add_location(div, file, 217, 12, 5919);
+    			add_location(div, file, 237, 12, 6261);
     		},
     		m: function mount(target, anchor) {
     			insert_dev(target, div, anchor);
@@ -5537,8 +6130,8 @@ var app = (function () {
     			append_dev(div, t3);
     		},
     		p: function update(ctx, dirty) {
-    			if (dirty & /*users*/ 4 && t0_value !== (t0_value = /*player*/ ctx[20].username + "")) set_data_dev(t0, t0_value);
-    			if (dirty & /*users*/ 4 && t2_value !== (t2_value = /*player*/ ctx[20].score + "")) set_data_dev(t2, t2_value);
+    			if (dirty[0] & /*$users*/ 128 && t0_value !== (t0_value = /*player*/ ctx[29].username + "")) set_data_dev(t0, t0_value);
+    			if (dirty[0] & /*$users*/ 128 && t2_value !== (t2_value = /*player*/ ctx[29].score + "")) set_data_dev(t2, t2_value);
     		},
     		d: function destroy(detaching) {
     			if (detaching) detach_dev(div);
@@ -5549,7 +6142,7 @@ var app = (function () {
     		block,
     		id: create_each_block.name,
     		type: "each",
-    		source: "(217:8) {#each Object.values(users) as player}",
+    		source: "(237:8) {#each Object.values($users) as player}",
     		ctx
     	});
 
@@ -5561,42 +6154,40 @@ var app = (function () {
     	let t0;
     	let main;
     	let div0;
+    	let h2;
     	let t1;
-    	let div1;
     	let t2;
     	let t3;
-    	let t4;
+    	let small;
+    	let t5;
+    	let div1;
+    	let t6;
+    	let t7;
+    	let t8;
     	let div4;
     	let h30;
-    	let t6;
+    	let t10;
     	let div2;
     	let label;
-    	let t8;
+    	let t12;
     	let input;
-    	let t9;
+    	let t13;
     	let div3;
     	let button0;
-    	let t11;
+    	let t15;
     	let button1;
-    	let t13;
+    	let t17;
     	let div5;
     	let h31;
-    	let t15;
+    	let t19;
+    	let current;
     	let mounted;
     	let dispose;
-    	document_1.title = title_value = "Masterpričam" + /*title*/ ctx[6];
-    	let each_value_2 = /*story*/ ctx[4];
-    	validate_each_argument(each_value_2);
-    	let each_blocks_1 = [];
-
-    	for (let i = 0; i < each_value_2.length; i += 1) {
-    		each_blocks_1[i] = create_each_block_2(get_each_context_2(ctx, each_value_2, i));
-    	}
-
-    	let if_block0 = /*state*/ ctx[1] == /*states*/ ctx[9].MY_TURN && create_if_block_2(ctx);
-    	let if_block1 = /*state*/ ctx[1] == /*states*/ ctx[9].OTHER_TURN && create_if_block_1(ctx);
-    	let if_block2 = /*state*/ ctx[1] == /*states*/ ctx[9].STOPPED && create_if_block(ctx);
-    	let each_value = Object.values(/*users*/ ctx[2]);
+    	document_1.title = title_value = "" + (/*title*/ ctx[4] + "Masterpričam");
+    	let if_block0 = /*state*/ ctx[0] == /*STATE*/ ctx[10].playing && create_if_block_2(ctx);
+    	let if_block1 = /*state*/ ctx[0] == /*STATE*/ ctx[10].waiting && create_if_block_1(ctx);
+    	let if_block2 = /*state*/ ctx[0] == /*STATE*/ ctx[10].stopped && create_if_block(ctx);
+    	let each_value = Object.values(/*$users*/ ctx[7]);
     	validate_each_argument(each_value);
     	let each_blocks = [];
 
@@ -5609,67 +6200,70 @@ var app = (function () {
     			t0 = space();
     			main = element("main");
     			div0 = element("div");
-
-    			for (let i = 0; i < each_blocks_1.length; i += 1) {
-    				each_blocks_1[i].c();
-    			}
-
-    			t1 = space();
+    			h2 = element("h2");
+    			t1 = text(/*time*/ ctx[6]);
+    			t2 = text("s");
+    			t3 = space();
+    			small = element("small");
+    			small.textContent = "time left";
+    			t5 = space();
     			div1 = element("div");
     			if (if_block0) if_block0.c();
-    			t2 = space();
+    			t6 = space();
     			if (if_block1) if_block1.c();
-    			t3 = space();
+    			t7 = space();
     			if (if_block2) if_block2.c();
-    			t4 = space();
+    			t8 = space();
     			div4 = element("div");
     			h30 = element("h3");
     			h30.textContent = "Postavke";
-    			t6 = space();
+    			t10 = space();
     			div2 = element("div");
     			label = element("label");
     			label.textContent = "Username";
-    			t8 = space();
+    			t12 = space();
     			input = element("input");
-    			t9 = space();
+    			t13 = space();
     			div3 = element("div");
     			button0 = element("button");
     			button0.textContent = "Snimi";
-    			t11 = space();
+    			t15 = space();
     			button1 = element("button");
     			button1.textContent = "Resetiraj igru";
-    			t13 = space();
+    			t17 = space();
     			div5 = element("div");
     			h31 = element("h3");
     			h31.textContent = "Igrači";
-    			t15 = space();
+    			t19 = space();
 
     			for (let i = 0; i < each_blocks.length; i += 1) {
     				each_blocks[i].c();
     			}
 
-    			attr_dev(div0, "class", "story");
-    			add_location(div0, file, 171, 4, 4335);
-    			attr_dev(div1, "class", "input-sentence svelte-mmojh");
-    			add_location(div1, file, 177, 4, 4491);
-    			add_location(h30, file, 203, 8, 5441);
-    			add_location(label, file, 205, 12, 5506);
-    			add_location(input, file, 206, 12, 5543);
+    			add_location(h2, file, 165, 8, 3851);
+    			add_location(small, file, 166, 8, 3877);
+    			attr_dev(div0, "class", "time svelte-yjn5i0");
+    			add_location(div0, file, 164, 4, 3823);
+    			attr_dev(div1, "class", "input-sentence svelte-yjn5i0");
+    			add_location(div1, file, 169, 4, 3921);
+    			add_location(h30, file, 223, 8, 5782);
+    			add_location(label, file, 225, 12, 5847);
+    			add_location(input, file, 226, 12, 5884);
     			attr_dev(div2, "class", "form-group");
-    			add_location(div2, file, 204, 8, 5468);
-    			attr_dev(button0, "class", "btn svelte-mmojh");
-    			add_location(button0, file, 209, 12, 5635);
-    			attr_dev(button1, "class", "btn svelte-mmojh");
-    			add_location(button1, file, 210, 12, 5709);
-    			attr_dev(div3, "class", "btn-group svelte-mmojh");
-    			add_location(div3, file, 208, 8, 5598);
-    			attr_dev(div4, "class", "settings svelte-mmojh");
-    			add_location(div4, file, 202, 4, 5409);
-    			add_location(h31, file, 215, 8, 5842);
+    			add_location(div2, file, 224, 8, 5809);
+    			attr_dev(button0, "class", "btn svelte-yjn5i0");
+    			add_location(button0, file, 229, 12, 5976);
+    			attr_dev(button1, "class", "btn svelte-yjn5i0");
+    			add_location(button1, file, 230, 12, 6050);
+    			attr_dev(div3, "class", "btn-group svelte-yjn5i0");
+    			add_location(div3, file, 228, 8, 5939);
+    			attr_dev(div4, "class", "settings svelte-yjn5i0");
+    			add_location(div4, file, 222, 4, 5750);
+    			add_location(h31, file, 235, 8, 6183);
     			attr_dev(div5, "class", "players");
-    			add_location(div5, file, 214, 4, 5811);
-    			attr_dev(main, "class", "svelte-mmojh");
-    			add_location(main, file, 170, 0, 4323);
+    			add_location(div5, file, 234, 4, 6152);
+    			attr_dev(main, "class", "svelte-yjn5i0");
+    			add_location(main, file, 163, 0, 3811);
     		},
     		l: function claim(nodes) {
     			throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
@@ -5678,105 +6272,97 @@ var app = (function () {
     			insert_dev(target, t0, anchor);
     			insert_dev(target, main, anchor);
     			append_dev(main, div0);
-
-    			for (let i = 0; i < each_blocks_1.length; i += 1) {
-    				each_blocks_1[i].m(div0, null);
-    			}
-
-    			append_dev(main, t1);
+    			append_dev(div0, h2);
+    			append_dev(h2, t1);
+    			append_dev(h2, t2);
+    			append_dev(div0, t3);
+    			append_dev(div0, small);
+    			append_dev(main, t5);
     			append_dev(main, div1);
     			if (if_block0) if_block0.m(div1, null);
-    			append_dev(div1, t2);
+    			append_dev(div1, t6);
     			if (if_block1) if_block1.m(div1, null);
-    			append_dev(div1, t3);
+    			append_dev(div1, t7);
     			if (if_block2) if_block2.m(div1, null);
-    			append_dev(main, t4);
+    			append_dev(main, t8);
     			append_dev(main, div4);
     			append_dev(div4, h30);
-    			append_dev(div4, t6);
+    			append_dev(div4, t10);
     			append_dev(div4, div2);
     			append_dev(div2, label);
-    			append_dev(div2, t8);
+    			append_dev(div2, t12);
     			append_dev(div2, input);
-    			set_input_value(input, /*username*/ ctx[5]);
-    			append_dev(div4, t9);
+    			set_input_value(input, /*username*/ ctx[3]);
+    			append_dev(div4, t13);
     			append_dev(div4, div3);
     			append_dev(div3, button0);
-    			append_dev(div3, t11);
+    			append_dev(div3, t15);
     			append_dev(div3, button1);
-    			append_dev(main, t13);
+    			append_dev(main, t17);
     			append_dev(main, div5);
     			append_dev(div5, h31);
-    			append_dev(div5, t15);
+    			append_dev(div5, t19);
 
     			for (let i = 0; i < each_blocks.length; i += 1) {
     				each_blocks[i].m(div5, null);
     			}
 
+    			current = true;
+
     			if (!mounted) {
     				dispose = [
-    					listen_dev(input, "input", /*input_input_handler*/ ctx[13]),
-    					listen_dev(button0, "click", /*onSaveSettings*/ ctx[10], false, false, false),
-    					listen_dev(button1, "click", /*onResetGame*/ ctx[11], false, false, false)
+    					listen_dev(input, "input", /*input_input_handler*/ ctx[20]),
+    					listen_dev(button0, "click", /*onSaveSettings*/ ctx[11], false, false, false),
+    					listen_dev(button1, "click", /*onResetGame*/ ctx[12], false, false, false)
     				];
 
     				mounted = true;
     			}
     		},
-    		p: function update(ctx, [dirty]) {
-    			if (dirty & /*title*/ 64 && title_value !== (title_value = "Masterpričam" + /*title*/ ctx[6])) {
+    		p: function update(ctx, dirty) {
+    			if ((!current || dirty[0] & /*title*/ 16) && title_value !== (title_value = "" + (/*title*/ ctx[4] + "Masterpričam"))) {
     				document_1.title = title_value;
     			}
 
-    			if (dirty & /*story*/ 16) {
-    				each_value_2 = /*story*/ ctx[4];
-    				validate_each_argument(each_value_2);
-    				let i;
+    			if (!current || dirty[0] & /*time*/ 64) set_data_dev(t1, /*time*/ ctx[6]);
 
-    				for (i = 0; i < each_value_2.length; i += 1) {
-    					const child_ctx = get_each_context_2(ctx, each_value_2, i);
-
-    					if (each_blocks_1[i]) {
-    						each_blocks_1[i].p(child_ctx, dirty);
-    					} else {
-    						each_blocks_1[i] = create_each_block_2(child_ctx);
-    						each_blocks_1[i].c();
-    						each_blocks_1[i].m(div0, null);
-    					}
-    				}
-
-    				for (; i < each_blocks_1.length; i += 1) {
-    					each_blocks_1[i].d(1);
-    				}
-
-    				each_blocks_1.length = each_value_2.length;
-    			}
-
-    			if (/*state*/ ctx[1] == /*states*/ ctx[9].MY_TURN) {
+    			if (/*state*/ ctx[0] == /*STATE*/ ctx[10].playing) {
     				if (if_block0) {
     					if_block0.p(ctx, dirty);
     				} else {
     					if_block0 = create_if_block_2(ctx);
     					if_block0.c();
-    					if_block0.m(div1, t2);
+    					if_block0.m(div1, t6);
     				}
     			} else if (if_block0) {
     				if_block0.d(1);
     				if_block0 = null;
     			}
 
-    			if (/*state*/ ctx[1] == /*states*/ ctx[9].OTHER_TURN) {
-    				if (if_block1) ; else {
+    			if (/*state*/ ctx[0] == /*STATE*/ ctx[10].waiting) {
+    				if (if_block1) {
+    					if_block1.p(ctx, dirty);
+
+    					if (dirty[0] & /*state*/ 1) {
+    						transition_in(if_block1, 1);
+    					}
+    				} else {
     					if_block1 = create_if_block_1(ctx);
     					if_block1.c();
-    					if_block1.m(div1, t3);
+    					transition_in(if_block1, 1);
+    					if_block1.m(div1, t7);
     				}
     			} else if (if_block1) {
-    				if_block1.d(1);
-    				if_block1 = null;
+    				group_outros();
+
+    				transition_out(if_block1, 1, 1, () => {
+    					if_block1 = null;
+    				});
+
+    				check_outros();
     			}
 
-    			if (/*state*/ ctx[1] == /*states*/ ctx[9].STOPPED) {
+    			if (/*state*/ ctx[0] == /*STATE*/ ctx[10].stopped) {
     				if (if_block2) ; else {
     					if_block2 = create_if_block(ctx);
     					if_block2.c();
@@ -5787,12 +6373,12 @@ var app = (function () {
     				if_block2 = null;
     			}
 
-    			if (dirty & /*username*/ 32 && input.value !== /*username*/ ctx[5]) {
-    				set_input_value(input, /*username*/ ctx[5]);
+    			if (dirty[0] & /*username*/ 8 && input.value !== /*username*/ ctx[3]) {
+    				set_input_value(input, /*username*/ ctx[3]);
     			}
 
-    			if (dirty & /*Object, users*/ 4) {
-    				each_value = Object.values(/*users*/ ctx[2]);
+    			if (dirty[0] & /*$users*/ 128) {
+    				each_value = Object.values(/*$users*/ ctx[7]);
     				validate_each_argument(each_value);
     				let i;
 
@@ -5815,12 +6401,18 @@ var app = (function () {
     				each_blocks.length = each_value.length;
     			}
     		},
-    		i: noop,
-    		o: noop,
+    		i: function intro(local) {
+    			if (current) return;
+    			transition_in(if_block1);
+    			current = true;
+    		},
+    		o: function outro(local) {
+    			transition_out(if_block1);
+    			current = false;
+    		},
     		d: function destroy(detaching) {
     			if (detaching) detach_dev(t0);
     			if (detaching) detach_dev(main);
-    			destroy_each(each_blocks_1, detaching);
     			if (if_block0) if_block0.d();
     			if (if_block1) if_block1.d();
     			if (if_block2) if_block2.d();
@@ -5841,17 +6433,12 @@ var app = (function () {
     	return block;
     }
 
-    function random(arr, n) {
-    	const shuffled = arr.sort(() => 0.5 - Math.random());
-    	let selected = shuffled.slice(0, n);
-    	return selected;
-    }
-
-    function escape(str) {
-    	return str.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+    function insertSpace(index) {
+    	
     }
 
     function instance($$self, $$props, $$invalidate) {
+    	let $users;
     	let { $$slots: slots = {}, $$scope } = $$props;
     	validate_slots('App', slots, []);
     	const socket = io();
@@ -5860,80 +6447,48 @@ var app = (function () {
     		console.log(event, data);
     	});
 
-    	let users = {};
-
-    	socket.on('users', data => {
-    		$$invalidate(2, users = {});
-
-    		for (const user of data) {
-    			$$invalidate(2, users[user.userId] = user, users);
-    		}
-    	});
-
-    	socket.on('username_change', data => {
-    		$$invalidate(2, users = {
-    			...users,
-    			[data.userId]: { ...users[data.userId], ...data }
-    		});
-    	});
-
-    	socket.on('user_connected', data => {
-    		$$invalidate(2, users = { ...users, [data.userId]: data });
-    	});
-
-    	socket.on('user_disconnected', data => {
-    		const { [data.userId]: removed, ...rest } = users;
-    		$$invalidate(2, users = rest);
-    	});
-
-    	let mustUseWords = [];
-    	let inputSentence;
-    	let includesWords = [];
+    	let users = connect(socket);
+    	validate_store(users, 'users');
+    	component_subscribe($$self, users, value => $$invalidate(7, $users = value));
 
     	function calculateWordUsage(text = '') {
-    		const _includesWords = [];
     		text = text.toLowerCase();
 
-    		for (const words of mustUseWords) {
+    		for (const words of bonusWords) {
     			words.containedInText = false;
 
     			for (const word of words) {
     				if (text.includes(word)) {
-    					_includesWords.push(word);
     					words.containedInText = true;
     					break;
     				}
     			}
     		}
 
-    		$$invalidate(3, mustUseWords);
-    		includesWords = _includesWords;
+    		bonusWords = bonusWords;
+    	}
+
+    	let inputSentence;
+
+    	function onSubmitSentence() {
+    		socket.emit('submit_sentence', inputSentence);
+    		$$invalidate(15, inputSentence = '');
     	}
 
     	let story = [];
-
-    	function onSubmitSentence() {
-    		for (const includedWord of includesWords) {
-    			var reg = new RegExp(escape(includedWord), 'ig');
-    			$$invalidate(0, inputSentence = inputSentence.replace(reg, `<span class="bonus">${includedWord}</span>`));
-    		}
-
-    		$$invalidate(4, story = [...story, inputSentence]);
-    		socket.emit('submit_sentence', inputSentence);
-    		$$invalidate(0, inputSentence = '');
-    	}
+    	let bonusWords = [];
 
     	socket.on('start_sentence', data => {
-    		$$invalidate(1, state = states.MY_TURN);
-    		$$invalidate(3, mustUseWords = data.words);
+    		$$invalidate(0, state = STATE.playing);
+    		bonusWords = data.words;
     	});
 
     	socket.on('stop_sentence', () => {
-    		$$invalidate(1, state = states.OTHER_TURN);
+    		$$invalidate(0, state = STATE.waiting);
     	});
 
     	socket.on('new_sentence', sentence => {
-    		$$invalidate(4, story = [...story, sentence]);
+    		story = [...story, sentence];
     	});
 
     	function onInputKeyup(event) {
@@ -5943,33 +6498,46 @@ var app = (function () {
     		}
     	}
 
-    	socket.on('start_game', data => {
-    		$$invalidate(4, story = data.story);
-
-    		for (const userId in data.scores) {
-    			$$invalidate(2, users[userId].score = data.scores[userId], users);
-    		}
-
-    		console.log(users);
-    		$$invalidate(2, users);
-    	});
-
-    	socket.on('score_update', data => {
-    		for (const userId in data) {
-    			$$invalidate(2, users[userId].score = data[userId], users);
-    		}
-    	});
-
-    	const states = {
-    		STOPPED: 'stopped',
-    		MY_TURN: 'my_turn',
-    		OTHER_TURN: 'other_turn'
+    	const STATE = {
+    		stopped: 'stopped',
+    		playing: 'playing',
+    		waiting: 'waiting'
     	};
 
-    	let state = states.STOPPED;
+    	let state = STATE.stopped;
+
+    	socket.on('start_game', data => {
+    		$$invalidate(0, state = STATE.waiting);
+    		story = data.story;
+
+    		for (const userId in data.scores) {
+    			set_store_value(users, $users[userId].score = data.scores[userId], $users);
+    		}
+
+    		console.log($users);
+    		users.set($users);
+    	});
+
+    	socket.on('start_turn', data => {
+    		$$invalidate(0, state = STATE.playing);
+    		$$invalidate(5, syls = data.syls);
+    		$$invalidate(1, added = []);
+    		$$invalidate(2, game.sentence = data.sentence.split('_'), game);
+    		$$invalidate(2, game.results = [], game);
+    	});
+
+    	const game = { sentence: null, results: [] };
+
+    	socket.on('end_turn', data => {
+    		$$invalidate(0, state = STATE.waiting);
+
+    		for (const [userId, syls] of data.syls) {
+    			game.results.push({ userId, syls });
+    		}
+    	});
 
     	socket.on('stop_game', () => {
-    		$$invalidate(1, state = states.STOPPED);
+    		$$invalidate(0, state = STATE.stopped);
     	});
 
     	let username = localStorage.getItem('username') || 'Anonymous';
@@ -5991,7 +6559,7 @@ var app = (function () {
     	function startTitleBlink() {
     		interval = setInterval(
     			() => {
-    				$$invalidate(6, title = title ? '' : '<');
+    				$$invalidate(4, title = title ? '' : '☞');
     			},
     			1000
     		);
@@ -5999,65 +6567,87 @@ var app = (function () {
 
     	function stopTitleBlink() {
     		clearInterval(interval);
-    		$$invalidate(6, title = '');
+    		$$invalidate(4, title = '');
     	}
 
-    	document.addEventListener("visibilitychange", () => {
+    	document.addEventListener('visibilitychange', () => {
     		if (!document.hidden && interval) {
     			stopTitleBlink();
     		}
     	});
 
+    	let syls = [];
+    	let added = [];
+
+    	function remove(syl) {
+    		$$invalidate(1, added = added.filter(s => s !== syl));
+    	}
+
+    	function add(syl) {
+    		$$invalidate(1, added = [...added, syl]);
+    	}
+
+    	let time = null;
+    	socket.on('time', data => $$invalidate(6, time = data));
     	const writable_props = [];
 
     	Object_1.keys($$props).forEach(key => {
     		if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console_1.warn(`<App> was created with unknown prop '${key}'`);
     	});
 
-    	function textarea_input_handler() {
-    		inputSentence = this.value;
-    		$$invalidate(0, inputSentence);
-    	}
+    	const click_handler = (syl, e) => remove(syl);
+    	const click_handler_1 = (i, e) => insertSpace();
+    	const func = s => !added.includes(s);
+    	const click_handler_2 = (syl, e) => add(syl);
 
     	function input_input_handler() {
     		username = this.value;
-    		$$invalidate(5, username);
+    		$$invalidate(3, username);
     	}
 
     	$$self.$capture_state = () => ({
     		io,
+    		connect,
     		socket,
     		users,
-    		random,
-    		mustUseWords,
-    		inputSentence,
-    		includesWords,
     		calculateWordUsage,
-    		story,
-    		escape,
+    		inputSentence,
     		onSubmitSentence,
+    		story,
+    		bonusWords,
     		onInputKeyup,
-    		states,
+    		STATE,
     		state,
+    		game,
     		username,
     		onSaveSettings,
     		onResetGame,
     		title,
     		interval,
     		startTitleBlink,
-    		stopTitleBlink
+    		stopTitleBlink,
+    		syls,
+    		added,
+    		remove,
+    		add,
+    		time,
+    		Sentence,
+    		insertSpace,
+    		$users
     	});
 
     	$$self.$inject_state = $$props => {
-    		if ('users' in $$props) $$invalidate(2, users = $$props.users);
-    		if ('mustUseWords' in $$props) $$invalidate(3, mustUseWords = $$props.mustUseWords);
-    		if ('inputSentence' in $$props) $$invalidate(0, inputSentence = $$props.inputSentence);
-    		if ('includesWords' in $$props) includesWords = $$props.includesWords;
-    		if ('story' in $$props) $$invalidate(4, story = $$props.story);
-    		if ('state' in $$props) $$invalidate(1, state = $$props.state);
-    		if ('username' in $$props) $$invalidate(5, username = $$props.username);
-    		if ('title' in $$props) $$invalidate(6, title = $$props.title);
+    		if ('users' in $$props) $$invalidate(8, users = $$props.users);
+    		if ('inputSentence' in $$props) $$invalidate(15, inputSentence = $$props.inputSentence);
+    		if ('story' in $$props) story = $$props.story;
+    		if ('bonusWords' in $$props) bonusWords = $$props.bonusWords;
+    		if ('state' in $$props) $$invalidate(0, state = $$props.state);
+    		if ('username' in $$props) $$invalidate(3, username = $$props.username);
+    		if ('title' in $$props) $$invalidate(4, title = $$props.title);
     		if ('interval' in $$props) interval = $$props.interval;
+    		if ('syls' in $$props) $$invalidate(5, syls = $$props.syls);
+    		if ('added' in $$props) $$invalidate(1, added = $$props.added);
+    		if ('time' in $$props) $$invalidate(6, time = $$props.time);
     	};
 
     	if ($$props && "$$inject" in $$props) {
@@ -6065,36 +6655,48 @@ var app = (function () {
     	}
 
     	$$self.$$.update = () => {
-    		if ($$self.$$.dirty & /*inputSentence*/ 1) {
+    		if ($$self.$$.dirty[0] & /*inputSentence*/ 32768) {
     			{
-    				console.log(inputSentence);
     				calculateWordUsage(inputSentence);
     			}
     		}
 
-    		if ($$self.$$.dirty & /*state*/ 2) {
+    		if ($$self.$$.dirty[0] & /*state*/ 1) {
     			{
-    				if (document.hidden && state == states.MY_TURN) {
+    				if (document.hidden && state == STATE.playing) {
     					startTitleBlink();
     				}
+    			}
+    		}
+
+    		if ($$self.$$.dirty[0] & /*added*/ 2) {
+    			{
+    				socket.emit('submit_sentence', [added, false]);
     			}
     		}
     	};
 
     	return [
-    		inputSentence,
     		state,
-    		users,
-    		mustUseWords,
-    		story,
+    		added,
+    		game,
     		username,
     		title,
+    		syls,
+    		time,
+    		$users,
+    		users,
     		onSubmitSentence,
-    		onInputKeyup,
-    		states,
+    		STATE,
     		onSaveSettings,
     		onResetGame,
-    		textarea_input_handler,
+    		remove,
+    		add,
+    		inputSentence,
+    		click_handler,
+    		click_handler_1,
+    		func,
+    		click_handler_2,
     		input_input_handler
     	];
     }
@@ -6102,7 +6704,7 @@ var app = (function () {
     class App extends SvelteComponentDev {
     	constructor(options) {
     		super(options);
-    		init(this, options, instance, create_fragment, safe_not_equal, {});
+    		init(this, options, instance, create_fragment, safe_not_equal, {}, null, [-1, -1]);
 
     		dispatch_dev("SvelteRegisterComponent", {
     			component: this,

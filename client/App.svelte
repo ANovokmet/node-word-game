@@ -1,101 +1,53 @@
 <script>
     import { io } from 'socket.io-client';
+    import { connect } from './users-store';
 
-    // const URL = 'http://localhost:3000';
     const socket = io();
 
     socket.onAny((event, data) => {
         console.log(event, data);
     });
 
-    let users = {};
-    socket.on('users', (data) => {
-        users = {};
-        for (const user of data) {
-            users[user.userId] = user;
-        }
-    });
-    socket.on('username_change', data => {
-        users = {
-            ...users,
-            [data.userId]: { ...users[data.userId], ...data }
-        };
-    })
-    socket.on('user_connected', (data) => {
-        users = {
-            ...users,
-            [data.userId]: data
-        };
-    });
-    socket.on('user_disconnected', (data) => {
-        const { [data.userId]: removed, ...rest } = users;
-        users = rest;
-    });
-
-    function random(arr, n) {
-        const shuffled = arr.sort(() => 0.5 - Math.random());
-        let selected = shuffled.slice(0, n);
-        return selected;
-    }
-
-    let mustUseWords = [];
-
-    let inputSentence;
-    $: {
-        console.log(inputSentence);
-        calculateWordUsage(inputSentence);
-    }
-
-    let includesWords = [];
+    let users = connect(socket);
+    
     function calculateWordUsage(text = '') {
-        const _includesWords = [];
         text = text.toLowerCase();
-        for (const words of mustUseWords) {
+        for (const words of bonusWords) {
             words.containedInText = false;
             for (const word of words) {
                 if(text.includes(word)) {
-                    _includesWords.push(word);
                     words.containedInText = true;
                     break;
                 }
             }
         }
-        mustUseWords = mustUseWords;
-        includesWords = _includesWords;
+        bonusWords = bonusWords;
     }
 
-    let story = [];
-
-    function escape(str) {
-        return str.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')
+    let inputSentence;
+    $: {
+        calculateWordUsage(inputSentence);
     }
 
     function onSubmitSentence() {
-
-        for (const includedWord of includesWords) {
-            var reg = new RegExp(escape(includedWord), 'ig');
-            inputSentence = inputSentence.replace(reg, `<span class="bonus">${includedWord}</span>`)
-        }
-
-        story = [...story, inputSentence];
-
         socket.emit('submit_sentence', inputSentence);
-
         inputSentence = '';
     }
 
+    let story = [];
+    let bonusWords = [];
     socket.on('start_sentence', (data) => {
-        state = states.MY_TURN;
-        mustUseWords = data.words; 
+        state = STATE.playing;
+        bonusWords = data.words; 
     });
 
     socket.on('stop_sentence', () => {
-        state = states.OTHER_TURN;
-    })
+        state = STATE.waiting;
+    });
 
     socket.on('new_sentence', sentence => {
         story = [...story, sentence];
-    })
+    });
 
     function onInputKeyup(event) {
         if (event.keyCode === 13) {
@@ -104,28 +56,48 @@
         }
     }
 
+
+    const STATE = {
+        stopped: 'stopped',
+        playing: 'playing',
+        waiting: 'waiting'
+    };
+    let state = STATE.stopped;
     socket.on('start_game', data => {
+        state = STATE.waiting;
         story = data.story;
         for(const userId in data.scores) {
-            users[userId].score = data.scores[userId];
+            $users[userId].score = data.scores[userId];
         }
-        console.log(users)
-        users = users;
+        console.log($users)
+        $users = $users;
     });
-    socket.on('score_update', data => {
-        for(const userId in data) {
-            users[userId].score = data[userId];
-        }
+
+    socket.on('start_turn', data => {
+        state = STATE.playing;
+        syls = data.syls;
+        added = [];
+        game.sentence = data.sentence.split('_');
+        game.results = [];
+    });
+
+    const game = {
+        sentence: null,
+        results: []
+    };
+
+    socket.on('end_turn', data => {
+        state = STATE.waiting;
+        for(const [userId, syls] of data.syls) {
+            game.results.push({
+                userId,
+                syls
+            });
+        }   
     })
 
-    const states = {
-        STOPPED: 'stopped',
-        MY_TURN: 'my_turn',
-        OTHER_TURN: 'other_turn'
-    };
-    let state = states.STOPPED;
     socket.on('stop_game', () => {
-        state = states.STOPPED;
+        state = STATE.stopped;
     })
 
     let username = localStorage.getItem('username') || 'Anonymous';
@@ -143,7 +115,7 @@
     let interval;
     function startTitleBlink() {
         interval = setInterval(() => {
-            title = title ? '' : '<';
+            title = title ? '' : '☞';
         }, 1000);
     }
 
@@ -152,49 +124,97 @@
         title = '';
     }
 
-    document.addEventListener("visibilitychange", () => {
+    document.addEventListener('visibilitychange', () => {
         if (!document.hidden && interval){
             stopTitleBlink();
         }
     });
 
     $: {
-        if(document.hidden && state == states.MY_TURN) {
+        if(document.hidden && state == STATE.playing) {
             startTitleBlink();
         }
+    }
+
+    let syls = [];
+    let added = [];
+    function remove(syl) {
+        added = added.filter(s => s !== syl);
+    }
+    function add(syl) {
+        added = [...added, syl];
+    }
+    $: {
+        socket.emit('submit_sentence', [added, false]);
+    }
+
+    let time = null;
+    socket.on('time', data => time = data);
+
+    import Sentence from './Sentence.svelte';
+
+    function insertSpace(index) {
+
     }
 </script>
 
 <svelte:head>
-    <title>Masterpričam{title}</title>
+    <title>{title}Masterpričam</title>
 </svelte:head>
 <main>
-    <div class="story">
-        {#each story as sentence}
-            <div class="story__sentence">{@html sentence}</div>
-        {/each}
+    <div class="time">
+        <h2>{time}s</h2>
+        <small>time left</small>
     </div>
 
     <div class="input-sentence">
-        {#if state == states.MY_TURN}
-            <h3>Na tebi je red da nastaviš priču</h3>
-            <div class="flex-row pills">
-                {#each mustUseWords as word}
-                    <span class="pill" class:used={word.containedInText} title={word.join(', ')}>{word[0]}</span>
+        {#if state == STATE.playing}
+        
+
+            <h3>Nadopuni rečenicu</h3>
+            <div class="syl-sentence syls">
+                <div class="syl syl-fixed">
+                    {game.sentence[0]}  
+                </div>
+                {#each added as syl, i}
+                    <div class="syl syl-added"
+                        on:click={e => remove(syl)}>
+                        {syl}
+                    </div>
+                    {#if i !== added.length - 1}
+                        <div class="space" on:click={e => insertSpace(i)}>
+                        </div>
+                    {/if}
+                {/each}
+                <div class="syl syl-fixed">
+                    {game.sentence[1]} 
+                </div>
+            </div>
+            <p></p>
+            <div class="syls">
+                {#each syls.filter(s => !added.includes(s)) as syl}
+                    <div class="syl syl-added"
+                        on:click={e => add(syl)}>
+                        {syl}
+                    </div>
                 {/each}
             </div>
-            <textarea class="dp-textarea" bind:value={inputSentence} on:keyup={onInputKeyup}></textarea>
             <div class="btn-group">
                 <button class="btn" on:click={onSubmitSentence}>Pošalji</button>
             </div>
         {/if}
 
-        {#if state == states.OTHER_TURN}
-            <h3>Čekaj</h3>
-            <p>Drugi igrač piše...</p>
+        {#if state == STATE.waiting}
+            <h3>Results</h3>
+            {#each game.results as result}
+                <div class="flex-row">
+                    <strong>{$users[result.userId].username}</strong>
+                    <Sentence syllables={result.syls} fixed={game.sentence}></Sentence>
+                </div>
+            {/each}
         {/if}
 
-        {#if state == states.STOPPED}
+        {#if state == STATE.stopped}
             <h3>Nađi drugog igrača</h3>
             <p>Igra je zaustavljena...</p>
         {/if}
@@ -214,7 +234,7 @@
 
     <div class="players">
         <h3>Igrači</h3>
-        {#each Object.values(users) as player}
+        {#each Object.values($users) as player}
             <div class="player">
                 {player.username}: {player.score}
             </div>
@@ -223,6 +243,57 @@
 </main>
 
 <style>
+    .time {
+        border: 1px solid #ccc;
+        width: 100px;
+        height: 100px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+    }
+
+    .syl-sentence {
+        display: flex;   
+    }
+
+    .space {
+        width: 0.2em;
+        color: transparent;
+        transition: all 0.2s ease-in-out;
+    }
+
+    .space:hover {
+        width: 0.4em;
+        background: rgb(255, 255, 0);
+    }
+
+    .syl {
+        padding: 0 1em;
+        height: 3em;
+        margin: 0.2em;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .syl-added {
+        width: 3em;
+        background-color: rgb(0, 184, 240);
+        color: white;
+    }
+
+    .syl-fixed {
+        background-color: rgb(109, 109, 109);
+        color: white;
+    }
+
+    .syls {
+        display: flex;
+        flex-direction: row;
+        flex-wrap: wrap;
+    }
+
     .story__sentence:nth-child(even) {
         background: #f0f0f0;
     }
